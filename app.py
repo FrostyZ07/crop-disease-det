@@ -421,46 +421,69 @@ Please be specific to {plant_type} plants and this particular disease. Use markd
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
-        # Get image data from request
+        if model is None:
+            load_model_and_classes()
+            
         data = request.get_json()
-        image_data = data['image'].split(',')[1]
-        image_bytes = base64.b64decode(image_data)
-        
-        # Convert to PIL Image
-        image = Image.open(io.BytesIO(image_bytes))
-        
-        # Process image
-        processed_frame, predicted_class, confidence = process_frame(image)
-        
-        # Get AI recommendations if disease is detected
-        recommendations = None
-        if predicted_class and '_diseased' in predicted_class.lower():
-            logger.info(f"Getting recommendations for predicted class: {predicted_class}")
-            recommendations = get_disease_recommendations(predicted_class)
-            logger.info(f"Recommendations response: {recommendations}")
-        
-        # Convert processed frame to base64
-        buffered = io.BytesIO()
-        processed_frame.save(buffered, format="JPEG")
-        processed_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        
-        response_data = {
+        if not data or 'image' not in data:
+            return jsonify({'success': False, 'error': 'No image data provided'}), 400
+
+        # Decode base64 image
+        try:
+            image_data = data['image'].split(',')[1]
+            image_bytes = base64.b64decode(image_data)
+            image = Image.open(io.BytesIO(image_bytes))
+        except Exception as e:
+            logger.error(f"Error decoding image: {str(e)}")
+            return jsonify({'success': False, 'error': 'Invalid image data'}), 400
+
+        # Preprocess image
+        try:
+            transformed = transform(image=np.array(image))
+            image_tensor = transformed['image'].unsqueeze(0).to(device)
+        except Exception as e:
+            logger.error(f"Error preprocessing image: {str(e)}")
+            return jsonify({'success': False, 'error': 'Error preprocessing image'}), 500
+
+        # Make prediction
+        try:
+            with torch.no_grad():
+                outputs = model(image_tensor)
+                probabilities = torch.nn.functional.softmax(outputs, dim=1)
+                confidence, predicted = torch.max(probabilities, 1)
+                predicted_class = classes[predicted.item()]
+                confidence = confidence.item()
+        except Exception as e:
+            logger.error(f"Error making prediction: {str(e)}")
+            return jsonify({'success': False, 'error': 'Error making prediction'}), 500
+
+        # Get recommendations
+        try:
+            prompt = f"Provide treatment recommendations for {predicted_class} in plants. Include both chemical and organic solutions."
+            completion = groq_client.chat.completions.create(
+                model="mixtral-8x7b-32768",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=500
+            )
+            recommendations = completion.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Error getting recommendations: {str(e)}")
+            recommendations = "Unable to generate recommendations at this time."
+
+        return jsonify({
             'success': True,
             'class': predicted_class,
-            'confidence': float(confidence) if confidence is not None else None,
-            'processed_image': f'data:image/jpeg;base64,{processed_image}',
-            'recommendations': recommendations
-        }
-        
-        logger.info(f"Sending prediction response with class {predicted_class} and confidence {confidence}")
-        return jsonify(response_data)
-    
-    except Exception as e:
-        logger.error(f"Error in prediction: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e)
+            'confidence': confidence,
+            'recommendations': {
+                'success': True,
+                'recommendations': recommendations
+            }
         })
+
+    except Exception as e:
+        logger.error(f"Unexpected error in predict endpoint: {str(e)}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/health')
 def health():

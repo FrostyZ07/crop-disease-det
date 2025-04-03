@@ -84,35 +84,33 @@ document.addEventListener('DOMContentLoaded', function() {
                 body: JSON.stringify({ image: imageData })
             });
             
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
             const data = await response.json();
             
-            if (data.success) {
-                // Update the image with the processed version
-                uploadedImage.src = data.processed_image;
-                
-                // Show prediction
-                prediction.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-                prediction.innerHTML = `
-                    ${data.class}<br>
-                    Confidence: ${(data.confidence * 100).toFixed(2)}%
-                `;
-                
-                // Show recommendations if available
-                if (data.recommendations && data.recommendations.success) {
-                    recommendations.style.display = 'block';
-                    recommendations.innerHTML = formatRecommendations(data.recommendations.recommendations);
-                } else if (data.recommendations && !data.recommendations.success) {
-                    recommendations.style.display = 'block';
-                    recommendations.innerHTML = `<p class="error">Unable to get recommendations: ${data.recommendations.error}</p>`;
-                } else {
-                    recommendations.style.display = 'none';
-                }
+            if (!data.success) {
+                throw new Error(data.error || 'Error processing image');
+            }
+            
+            // Show prediction
+            prediction.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            prediction.innerHTML = `
+                ${data.class}<br>
+                Confidence: ${(data.confidence * 100).toFixed(2)}%
+            `;
+            
+            // Show recommendations if available
+            if (data.recommendations && data.recommendations.success) {
+                recommendations.style.display = 'block';
+                recommendations.innerHTML = formatRecommendations(data.recommendations.recommendations);
             } else {
-                showError(data.error || 'Error processing image');
+                recommendations.style.display = 'none';
             }
         } catch (error) {
             console.error('Error:', error);
-            showError('Error processing image');
+            showError(error.message || 'Error processing image. Please try again.');
         }
     }
 
