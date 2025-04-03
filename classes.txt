@@ -1,0 +1,20 @@
+Alstonia Scholaris_healthy
+Alstonia Scholaris_diseased
+Arjun_healthy
+Arjun_diseased
+Chinar_healthy
+Chinar_diseased
+Gauva_healthy
+Gauva_diseased
+Jamun_healthy
+Jamun_diseased
+Jatropha_healthy
+Jatropha_diseased
+Lemon_healthy
+Lemon_diseased
+Mango_healthy
+Mango_diseased
+Pomegranate_healthy
+Pomegranate_diseased
+Pongamia Pinnata_healthy
+Pongamia Pinnata_diseased
