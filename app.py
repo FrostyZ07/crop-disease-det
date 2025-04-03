@@ -29,7 +29,7 @@ classes = None
 transform = None
 
 # Add Groq API configuration
-GROQ_API_KEY = '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'
+GROQ_API_KEY = os.getenv('GROQ_API_KEY', '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')
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 def is_valid_class(class_name):
@@ -47,100 +47,37 @@ def load_model_and_classes():
         
         classes = [c for c in all_classes if c and not c.startswith('__')]
         logger.info(f"Loaded {len(all_classes)} total classes, {len(classes)} valid classes")
-        logger.info(f"Valid classes: {classes}")
         
-        # Load model and classes
-        logger.info("Loading model and classes...")
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        logger.info(f"Using device: {device}")
-        
-        # Initialize model with the same architecture as training
+        # Initialize model
         logger.info("Initializing model...")
-        model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+        model = models.resnet50(pretrained=False)
         num_classes = len(classes)
+        model.fc = nn.Linear(model.fc.in_features, num_classes)
         
-        # Use the same architecture as in training
-        in_features = model.fc.in_features
-        model.fc = nn.Sequential(
-            nn.Linear(in_features, 512),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(512, num_classes)
-        )
-        logger.info(f"Model architecture initialized with {num_classes} output classes")
-        
-        # Load the saved state dict
-        logger.info("Loading saved model state...")
-        state_dict = torch.load('best_model.pth', map_location=device)
-        logger.info(f"Loaded state dict type: {type(state_dict)}")
-        
-        # Handle different state dict formats
+        # Load model weights
+        model_path = 'best_model.pth'
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found at {model_path}")
+            
+        state_dict = torch.load(model_path, map_location=device)
         if isinstance(state_dict, dict):
             if 'state_dict' in state_dict:
-                logger.info("Found 'state_dict' key in loaded model")
                 state_dict = state_dict['state_dict']
             elif 'model_state_dict' in state_dict:
-                logger.info("Found 'model_state_dict' key in loaded model")
                 state_dict = state_dict['model_state_dict']
         
-        # Create a new state dict with the correct keys
-        new_state_dict = {}
-        for key, value in state_dict.items():
-            # Remove any module prefix
-            if key.startswith('module.'):
-                key = key[7:]
-            
-            if key.startswith('backbone.'):
-                # Map backbone keys to base model
-                new_key = key.replace('backbone.', '')
-                if new_key.startswith('fc.'):
-                    # Handle the classifier layers
-                    if 'fc.0.' in new_key:  # First linear layer
-                        new_key = new_key.replace('fc.0.', 'fc.0.')
-                    elif 'fc.3.' in new_key:  # Second linear layer
-                        new_key = new_key.replace('fc.3.', 'fc.3.')
-                new_state_dict[new_key] = value
-            else:
-                new_state_dict[key] = value
-        
-        logger.info(f"Processed state dict keys: {list(new_state_dict.keys())}")
-        
-        # Load the modified state dict
-        missing_keys, unexpected_keys = model.load_state_dict(new_state_dict, strict=False)
-        logger.info(f"Missing keys: {missing_keys}")
-        logger.info(f"Unexpected keys: {unexpected_keys}")
-        
-        model = model.to(device)
+        model.load_state_dict(state_dict)
+        model.to(device)
         model.eval()
-        logger.info(f"Model loaded successfully and moved to {device}")
-        
-        # Initialize transform to match training
-        transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        logger.info("Model loaded successfully")
+
+        # Setup transforms
+        transform = A.Compose([
+            A.Resize(224, 224),
+            A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ToTensorV2(),
         ])
-        logger.info("Transform pipeline initialized")
-        
-        # Test forward pass with sample data
-        logger.info("Testing forward pass...")
-        dummy_input = torch.randn(1, 3, 224, 224).to(device)
-        with torch.no_grad():
-            try:
-                output = model(dummy_input)
-                probabilities = torch.softmax(output, dim=1)
-                logger.info(f"Forward pass successful. Output shape: {output.shape}")
-                logger.info(f"Sample probabilities: {probabilities[0][:5]}")
-                
-                # Test with a green image
-                green_input = torch.zeros(1, 3, 224, 224).to(device)
-                green_input[:, 1, :, :] = 1  # Set green channel to 1
-                green_output = model(green_input)
-                green_probs = torch.softmax(green_output, dim=1)
-                logger.info(f"Green image test probabilities: {green_probs[0][:5]}")
-            except Exception as e:
-                logger.error(f"Forward pass failed: {str(e)}")
-        
+        logger.info("Transforms configured successfully")
         return True
     except Exception as e:
         logger.error(f"Error loading model and classes: {str(e)}")
@@ -421,8 +358,11 @@ Please be specific to {plant_type} plants and this particular disease. Use markd
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
+        # Ensure model is loaded
         if model is None:
-            load_model_and_classes()
+            success = load_model_and_classes()
+            if not success:
+                return jsonify({'success': False, 'error': 'Failed to load model'}), 500
             
         data = request.get_json()
         if not data or 'image' not in data:
@@ -526,6 +466,9 @@ def test_camera():
         })
 
 if __name__ == '__main__':
-    load_model_and_classes()
-    logger.info("Starting Flask server...")
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True) 
+    try:
+        load_model_and_classes()
+        logger.info("Starting Flask server...")
+        app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    except Exception as e:
+        logger.error(f"Failed to start application: {str(e)}") 

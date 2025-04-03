@@ -8,4 +8,9 @@ services:
       - key: PYTHON_VERSION
         value: 3.9.0
       - key: GROQ_API_KEY
-        sync: false 
+        sync: false
+    plan: standard
+    disk:
+      name: model-storage
+      mountPath: /opt/render/project/src
+      sizeGB: 10 
